@@ -1,156 +1,277 @@
-# Pulse-Check-API ("Watchdog" Sentinel)
+# Pulse-Check-API — "Watchdog" Sentinel
 
-This challenge is designed to test your ability to bridge Computer Science fundamentals with Modern Backend Engineering.
-
-## 1. Business Context
-
-> **Client:** _CritMon Servers Inc._ (A Critical Infrastructure Monitoring Company).
-
-### The Problem
-
-CritMon provides monitoring for remote solar farms and unmanned weather stations in areas with poor connectivity. These devices are supposed to send "I'm alive" signals every hour.
-
-Currently, CritMon has no way of knowing if a device has gone offline (due to power failure or theft) until a human manually checks the logs. They need a system that alerts _them_ when a device _stops_ talking.
-
-### The Solution
-
-You need to build a **Dead Man’s Switch API**. Devices will register a "monitor" with a countdown timer (e.g., 60 seconds). If the device fails to "ping" (send a heartbeat) to the API before the timer runs out, the system automatically triggers an alert.
+A Spring Boot Dead Man's Switch service for CritMon Servers Inc. Remote devices register a monitor with a countdown timer; if no heartbeat arrives before the countdown reaches zero, the system automatically fires an alert.
 
 ---
 
-## 2. Technical Objective
+## Architecture Diagram
 
-Build a backend service that manages stateful timers.
+```mermaid
+flowchart TD
+    A([Device Administrator]) -->|POST /monitors| B{Monitor already\nexists?}
+    B -->|Yes| C[409 Conflict]
+    B -->|No| D[Create Monitor\nstatus = ACTIVE]
+    D --> E[Start countdown timer\n— ScheduledExecutorService]
+    E --> F([Monitor Running])
 
-- **Registration:** Allow a client to create a monitor with a specific timeout duration.
-- **Heartbeat:** Reset the countdown when a ping is received.
-- **Trigger:** Fire a webhook (or log a critical error) if the countdown reaches zero.
+    F -->|POST /monitors/{id}/heartbeat| G[Cancel existing timer]
+    G --> H[Update lastHeartbeat]
+    H --> I[Set status = ACTIVE]
+    I --> E
 
----
+    F -->|POST /monitors/{id}/pause| J[Cancel timer]
+    J --> K([status = PAUSED])
+    K -->|POST /monitors/{id}/heartbeat| I
 
-## 3. Getting Started
+    E -->|Countdown reaches 0| L[fireAlert]
+    L --> M[Log JSON alert to ERROR log]
+    M --> N([status = DOWN])
 
-1.  **Fork this Repository:** Do not clone it directly. Create a fork to your own GitHub account.
-2.  **Environment:** You may use **Node.js, Python, Java or Go, etc.**.
-3.  **Submission:** Your final submission will be a link to your forked repository containing:
-    - The source code.
-    - The **Architecture Diagram**
-    - The `README.md` with documentation.
+    F -->|GET /monitors/{id}| O[Return status +\nseconds remaining]
+    F -->|GET /monitors| P[Return all monitors]
+    F -->|DELETE /monitors/{id}| Q[Cancel timer\nRemove monitor]
 
----
-
-## 4. The Architecture Diagram
-
-**Task:** Before you write any code, you must design the logic flow.
-**Deliverable:** A **Sequence Diagram** or **State Flowchart** embedded in your `README.md`.
-
----
-
-## 5. User Stories & Acceptance Criteria
-
-### User Story 1: Registering a Monitor
-
-**As a** device administrator,
-**I want to** create a new monitor for my device,
-**So that** the system knows to track its status.
-
-**Acceptance Criteria:**
-
-- [ ] The API accepts a `POST /monitors` request.
-- [ ] Input: `{"id": "device-123", "timeout": 60, "alert_email": "admin@critmon.com"}`.
-- [ ] The system starts a countdown timer for 60 seconds associated with `device-123`.
-- [ ] Response: `201 Created` with a confirmation message.
-
-### User Story 2: The Heartbeat (Reset)
-
-**As a** remote device,
-**I want to** send a signal to the server,
-**So that** my timer is reset and no alert is sent.
-
-**Acceptance Criteria:**
-
-- [ ] The API accepts a `POST /monitors/{id}/heartbeat` request.
-- [ ] If the ID exists and the timer has NOT expired:
-  - [ ] Restart the countdown from the beginning (e.g., reset to 60 seconds).
-  - [ ] Return `200 OK`.
-- [ ] If the ID does not exist:
-  - [ ] Return `404 Not Found`.
-
-### User Story 3: The Alert (Failure State)
-
-**As a** support engineer,
-**I want to** be notified immediately if a device stops sending heartbeats,
-**So that** I can deploy a repair team.
-
-**Acceptance Criteria:**
-
-- [ ] If the timer for `device-123` reaches 0 seconds (no heartbeat received):
-  - [ ] The system must internally "fire" an alert.
-  - [ ] **Implementation:** For this project, simply `console.log` a JSON object: `{"ALERT": "Device device-123 is down!", "time": <timestamp>}`. (Or simulate sending an email).
-  - [ ] The monitor status changes to `down`.
+    style C fill:#f66,color:#fff
+    style N fill:#f66,color:#fff
+    style K fill:#f90,color:#fff
+    style D fill:#6a6,color:#fff
+```
 
 ---
 
-## 6. Bonus User Story (The "Snooze" Button)
+## Setup Instructions
 
-**As a** maintenance technician,
-**I want to** pause monitoring while I am repairing a device,
-**So that** I don't trigger false alarms.
+### Prerequisites
 
-**Acceptance Criteria:**
+- Java 17+
+- Maven 3.8+
 
-- [ ] Create a `POST /monitors/{id}/pause` endpoint.
-- [ ] When called, the timer stops completely. No alerts will fire.
-- [ ] Calling the heartbeat endpoint again automatically "un-pauses" the monitor and restarts the timer.
+### Run
 
----
+```bash
+cd backend/Pulse-Check
+mvn spring-boot:run
+```
 
-## 7. The "Developer's Choice" Challenge
+Server starts on **http://localhost:8081**
 
-We value engineers who look for "what's missing."
+### Build executable JAR
 
-**Task:** Identify **one** additional feature that makes this system more robust or user-friendly.
-
-1.  **Implement it.**
-2.  **Document it:** Explain _why_ you added it in your README.
-
----
-
-## 8. Documentation Requirements
-
-Your final `README.md` must replace these instructions. It must cover:
-
-1.  **Architecture Diagram**
-2.  **Setup Instructions**
-3.  **API Documentation**
-4.  **The Developer's Choice:** Explanation of your added feature.
+```bash
+mvn clean package
+java -jar target/pulse-check-0.0.1-SNAPSHOT.jar
+```
 
 ---
 
-Submit your repo link via the [online](https://forms.cloud.microsoft/e/bLyGT3byxx) form.
+## API Documentation
 
-## 🛑 Pre-Submission Checklist
+### `POST /monitors`
 
-**WARNING:** Before you submit your solution, you **MUST** pass every item on this list.
-If you miss any of these critical steps, your submission will be **automatically rejected** and you will **NOT** be invited to an interview.
+Registers a new device monitor and starts its countdown timer.
 
-### 1. 📂 Repository & Code
+**Request Body:**
 
-- [ ] **Public Access:** Is your GitHub repository set to **Public**? (We cannot review private repos).
-- [ ] **Clean Code:** Did you remove unnecessary files (like `node_modules`, `.env` with real keys, or `.DS_Store`)?
-- [ ] **Run Check:** if we clone your repo and run `npm start` (or equivalent), does the server start immediately without crashing?
+```json
+{
+  "id": "device-123",
+  "timeout": 60,
+  "alertEmail": "admin@critmon.com"
+}
+```
 
-### 2. 📄 Documentation (Crucial)
+| Field        | Type    | Constraints                    |
+|--------------|---------|--------------------------------|
+| `id`         | string  | Required, unique               |
+| `timeout`    | integer | Required, minimum 1 second     |
+| `alertEmail` | string  | Required, valid email format   |
 
-- [ ] **Architecture Diagram:** Did you include a visual Diagram (Flowchart or Sequence Diagram) in the README?
-- [ ] **README Swap:** Did you **DELETE** the original instructions (the problem brief) from this file and replace it with your own documentation?
-- [ ] **API Docs:** Is there a clear list of Endpoints and Example Requests in the README?
+**Response — 201 Created:**
 
-### 3. 🧹 Git Hygiene
-
-- [ ] **Commit History:** Does your repo have multiple commits with meaningful messages? (A single "Initial Commit" is a red flag).
+```json
+{
+  "message": "Monitor registered. Countdown started.",
+  "monitorId": "device-123",
+  "timeout": 60,
+  "alertEmail": "admin@critmon.com",
+  "status": "ACTIVE"
+}
+```
 
 ---
 
-**Ready?**
-If you checked all the boxes above, submit your repository link in the application form. Good luck! 🚀
+### `POST /monitors/{id}/heartbeat`
+
+Resets the countdown for the specified monitor. Also un-pauses a paused monitor.
+
+**Response — 200 OK:**
+
+```json
+{
+  "message": "Heartbeat received. Timer reset.",
+  "monitorId": "device-123",
+  "status": "ACTIVE",
+  "lastHeartbeat": "2024-06-01T12:05:00.000Z",
+  "secondsRemaining": 60
+}
+```
+
+**Response — 404 Not Found:**
+
+```json
+{
+  "status": 404,
+  "error": "Monitor not found: device-123",
+  "timestamp": "2024-06-01T12:05:00.000Z"
+}
+```
+
+---
+
+### `POST /monitors/{id}/pause`
+
+Stops the countdown completely. No alert will fire until a heartbeat is received.
+
+**Response — 200 OK:**
+
+```json
+{
+  "message": "Monitor paused. No alerts will fire until a heartbeat is received.",
+  "monitorId": "device-123",
+  "status": "PAUSED"
+}
+```
+
+---
+
+### `GET /monitors/{id}` *(Developer's Choice)*
+
+Returns the current status and live time remaining for a single monitor.
+
+**Response — 200 OK:**
+
+```json
+{
+  "id": "device-123",
+  "status": "ACTIVE",
+  "timeout": 60,
+  "alertEmail": "admin@critmon.com",
+  "secondsRemaining": 42,
+  "lastHeartbeat": "2024-06-01T12:05:00.000Z",
+  "expiresAt": "2024-06-01T12:06:00.000Z",
+  "createdAt": "2024-06-01T12:00:00.000Z"
+}
+```
+
+---
+
+### `GET /monitors` *(Developer's Choice)*
+
+Returns all registered monitors.
+
+**Response — 200 OK:**
+
+```json
+[
+  {
+    "id": "device-123",
+    "status": "ACTIVE",
+    "timeout": 60,
+    ...
+  }
+]
+```
+
+---
+
+### `DELETE /monitors/{id}` *(Developer's Choice)*
+
+Deregisters a monitor and cancels its timer cleanly.
+
+**Response — 200 OK:**
+
+```json
+{
+  "message": "Monitor deregistered successfully.",
+  "monitorId": "device-123"
+}
+```
+
+---
+
+### Alert Payload (logged when countdown reaches zero)
+
+When a device misses its heartbeat, the following JSON is written to the application's ERROR log:
+
+```json
+{
+  "ALERT": "Device device-123 is down!",
+  "time": "2024-06-01T12:06:00.000Z",
+  "deviceId": "device-123",
+  "alertEmail": "admin@critmon.com"
+}
+```
+
+---
+
+## Example cURL Commands
+
+**Register a monitor (60-second timeout):**
+
+```bash
+curl -X POST http://localhost:8081/monitors \
+  -H "Content-Type: application/json" \
+  -d '{"id":"device-123","timeout":60,"alertEmail":"admin@critmon.com"}'
+```
+
+**Send a heartbeat:**
+
+```bash
+curl -X POST http://localhost:8081/monitors/device-123/heartbeat
+```
+
+**Pause for maintenance:**
+
+```bash
+curl -X POST http://localhost:8081/monitors/device-123/pause
+```
+
+**Check live status:**
+
+```bash
+curl http://localhost:8081/monitors/device-123
+```
+
+**List all monitors:**
+
+```bash
+curl http://localhost:8081/monitors
+```
+
+**Deregister:**
+
+```bash
+curl -X DELETE http://localhost:8081/monitors/device-123
+```
+
+---
+
+## Developer's Choice — Monitor Status Inspection & Lifecycle Management
+
+**What was added:**
+
+Three additional endpoints beyond the required specification:
+
+| Endpoint                  | Purpose                                     |
+|---------------------------|---------------------------------------------|
+| `GET /monitors/{id}`      | Live status: current state + seconds remaining |
+| `GET /monitors`           | Dashboard view of all registered monitors   |
+| `DELETE /monitors/{id}`   | Clean deregistration — cancels timer, frees resources |
+
+**Why these were added:**
+
+1. **Observability gap:** Without `GET /monitors/{id}`, there is no way to verify a monitor is running or to see how much time is left before an alert fires. Support engineers would be flying blind. The `secondsRemaining` field is calculated live from the scheduled expiry timestamp, so it always reflects the real remaining window.
+
+2. **Operational necessity:** Without `DELETE /monitors/{id}`, monitors can never be cleanly removed. A device that is retired or replaced would leave a zombie monitor that keeps firing alerts forever. The delete endpoint also cancels the underlying `ScheduledFuture` to prevent resource leaks.
+
+3. **Dashboard use-case:** `GET /monitors` enables a simple operational dashboard to be built on top of the API — CritMon staff can see the entire fleet status at a glance.
