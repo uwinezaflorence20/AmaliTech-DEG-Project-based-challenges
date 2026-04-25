@@ -1,5 +1,6 @@
 package com.critmon.pulsecheck.model;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -14,6 +15,7 @@ public class CreateMonitorRequest {
     @Min(value = 1, message = "Timeout must be at least 1 second")
     private Integer timeout;
 
+    @JsonProperty("alert_email")
     @NotBlank(message = "Alert email is required")
     @Email(message = "Alert email must be a valid email address")
     private String alertEmail;
